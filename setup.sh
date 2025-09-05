@@ -6,7 +6,7 @@ set -e
 
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
-exec bash
+source ~/.bashrc
 
 echo "Making scraper executable..."
 chmod +x scraper.py
