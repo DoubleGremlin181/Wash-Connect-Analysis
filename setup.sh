@@ -21,24 +21,13 @@ SCRIPT_DIR="$(pwd)"
 RUN_SCRIPT="$SCRIPT_DIR/run_scraper.sh"
 
 echo "Creating helper script: $RUN_SCRIPT..."
-
 cat > "$RUN_SCRIPT" <<'EOF'
 #!/bin/bash
-# Usage: ./run_scraper.sh LOCATION_CODE
 
-if [ -z "$1" ]; then
-    echo "Error: Please provide a location code as argument."
-    exit 1
-fi
+cd "${SCRIPT_DIR}"
+export PATH="\$HOME/.local/bin:\$HOME/.cargo/bin:$PATH"
 
-LOCATION_CODE="$1"
-SCRIPT_DIR="$(dirname "$0")"
-
-cd "$SCRIPT_DIR"
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-
-UV_PATH=$(which uv)
-$UV_PATH run ./scraper.py "$LOCATION_CODE" >> "$SCRIPT_DIR/logs/$LOCATION_CODE.log" 2>&1
+./scraper.py "${LOCATION_CODE}" >> "/var/log/api_scraper.log" 2>&1
 EOF
 
 chmod +x "$RUN_SCRIPT"
