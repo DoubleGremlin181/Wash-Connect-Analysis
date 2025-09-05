@@ -21,13 +21,13 @@ SCRIPT_DIR="$(pwd)"
 RUN_SCRIPT="$SCRIPT_DIR/run_scraper.sh"
 
 echo "Creating helper script: $RUN_SCRIPT..."
-cat > "$RUN_SCRIPT" <<'EOF'
+cat > "$RUN_SCRIPT" <<EOF
 #!/bin/bash
 
-cd "${SCRIPT_DIR}"
-export PATH="\$HOME/.local/bin:\$HOME/.cargo/bin:$PATH"
+cd "$SCRIPT_DIR"
+export PATH="\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH"
 
-./scraper.py "${LOCATION_CODE}" >> "/var/log/api_scraper.log" 2>&1
+./scraper.py "$LOCATION_CODE" >> "/var/log/api_scraper.log" 2>&1
 EOF
 
 chmod +x "$RUN_SCRIPT"
