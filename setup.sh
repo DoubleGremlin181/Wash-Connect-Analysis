@@ -22,7 +22,7 @@ SCRIPT_PATH="$(pwd)/scraper.py"
 CRON_JOB="*/5 * * * * $UV_PATH run $SCRIPT_PATH $LOCATION_CODE"
 
 # Add to crontab
-(crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+(crontab -l; echo "$CRON_JOB") | crontab -
 
 echo "Done! Scraper will run every 5 minutes for location: $LOCATION_CODE"
 echo "Logs: ./logs/$LOCATION_CODE.log"
