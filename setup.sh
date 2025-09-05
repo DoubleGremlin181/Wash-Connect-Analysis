@@ -6,7 +6,7 @@ set -e
 
 echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
+. ~/.bashrc
 
 echo "Getting uv path..."
 UV_PATH=$(which uv)
