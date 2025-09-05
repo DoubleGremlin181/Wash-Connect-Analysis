@@ -19,7 +19,7 @@ read LOCATION_CODE
 
 echo "Adding to crontab (runs every 5 minutes)..."
 SCRIPT_PATH="$(pwd)/scraper.py"
-CRON_JOB="*/5 * * * * $UV_PATH run $SCRIPT_PATH $LOCATION_CODE"
+CRON_JOB="*/5 * * * * $UV_PATH run $SCRIPT_PATH $LOCATION_CODE  > /var/log/apr_scraper.log 2>&1"
 
 # Check if crontab exists, if not create an empty one
 if ! crontab -l; then
