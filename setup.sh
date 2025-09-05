@@ -21,6 +21,12 @@ echo "Adding to crontab (runs every 5 minutes)..."
 SCRIPT_PATH="$(pwd)/scraper.py"
 CRON_JOB="*/5 * * * * $UV_PATH run $SCRIPT_PATH $LOCATION_CODE"
 
+# Check if crontab exists, if not create an empty one
+if ! crontab -l; then
+    echo "No crontab found. Creating a new one..."
+    echo "" | crontab -
+fi
+
 # Add to crontab
 (crontab -l; echo "$CRON_JOB") | crontab -
 
