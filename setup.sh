@@ -8,6 +8,9 @@ echo "Installing uv..."
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 
+echo "Getting uv path..."
+UV_PATH=$(which uv)
+
 echo "Making scraper executable..."
 chmod +x scraper.py
 
@@ -16,7 +19,7 @@ read LOCATION_CODE
 
 echo "Adding to crontab (runs every 5 minutes)..."
 SCRIPT_PATH="$(pwd)/scraper.py"
-CRON_JOB="*/5 * * * * $SCRIPT_PATH $LOCATION_CODE"
+CRON_JOB="*/5 * * * * $UV_PATH run $SCRIPT_PATH $LOCATION_CODE"
 
 # Add to crontab
 (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
