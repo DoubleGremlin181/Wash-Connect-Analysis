@@ -363,7 +363,7 @@ async def run_bulk_scraper(
     async with aiohttp.ClientSession() as session:
         start_time = asyncio.get_event_loop().time()
 
-        # Phase 1: Scrape location data for codes that need it
+        # Phase 1: Scrape location data for codes that need it (one-time setup)
         if codes_needing_location:
             # Calculate dynamic batch parameters for location scraping
             location_batch_size, location_batch_interval = calculate_batch_parameters(
@@ -422,73 +422,99 @@ async def run_bulk_scraper(
             # Update existing locations with new ones
             existing_locations.update(new_locations)
 
-        # Phase 2: Scrape machine status for all valid locations
-        if existing_locations:
-            # Calculate timing for next phase
-            phase1_duration = asyncio.get_event_loop().time() - start_time
+        # Phase 2: Continuous machine status scraping
+        if not existing_locations:
+            logger.warning("No valid locations found for machine status scraping")
+            return
 
-            # If we're in the same interval, wait for next interval boundary
-            if codes_needing_location and phase1_duration < interval_seconds:
-                remaining_time = interval_seconds - phase1_duration
+        # Calculate timing for next phase
+        phase1_duration = asyncio.get_event_loop().time() - start_time
+
+        # If we're in the same interval, wait for next interval boundary
+        if codes_needing_location and phase1_duration < interval_seconds:
+            remaining_time = interval_seconds - phase1_duration
+            logger.info(
+                f"Waiting {remaining_time:.2f}s before starting continuous machine status phase"
+            )
+            await asyncio.sleep(remaining_time)
+
+        # Calculate dynamic batch parameters for machine status scraping
+        status_batch_size, status_batch_interval = calculate_batch_parameters(
+            len(existing_locations), interval_seconds, max_batch_size=max_concurrent
+        )
+
+        total_status_batches = math.ceil(len(existing_locations) / status_batch_size)
+
+        logger.info(
+            f"Phase 2: Starting continuous machine status scraping for {len(existing_locations)} locations"
+        )
+        logger.info(
+            f"Status batch size: {status_batch_size}, interval: {status_batch_interval:.2f}s, total batches: {total_status_batches}"
+        )
+        logger.info(
+            f"Rate: {len(existing_locations) / interval_seconds:.2f} requests/second"
+        )
+        logger.info(f"Each location will be updated every {interval_minutes} minutes")
+        logger.info("Press Ctrl+C to stop the continuous scraping...")
+
+        location_items = list(existing_locations.items())
+        cycle_count = 0
+
+        try:
+            while True:
+                cycle_count += 1
+                cycle_start_time = asyncio.get_event_loop().time()
+                total_success = 0
+
                 logger.info(
-                    f"Waiting {remaining_time:.2f}s before starting machine status phase"
+                    f"Starting cycle {cycle_count} - processing {len(existing_locations)} locations"
                 )
-                await asyncio.sleep(remaining_time)
 
-            # Calculate dynamic batch parameters for machine status scraping
-            status_batch_size, status_batch_interval = calculate_batch_parameters(
-                len(existing_locations), interval_seconds, max_batch_size=max_concurrent
-            )
+                # Process machine status in batches
+                for i in range(0, len(location_items), status_batch_size):
+                    batch_dict = dict(location_items[i : i + status_batch_size])
+                    batch_start = asyncio.get_event_loop().time()
 
-            total_status_batches = math.ceil(
-                len(existing_locations) / status_batch_size
-            )
+                    batch_num = i // status_batch_size + 1
+                    logger.debug(
+                        f"Cycle {cycle_count}: Processing batch {batch_num}/{total_status_batches} ({len(batch_dict)} locations)"
+                    )
 
-            logger.info(
-                f"Phase 2: Scraping machine status for {len(existing_locations)} locations"
-            )
-            logger.info(
-                f"Status batch size: {status_batch_size}, interval: {status_batch_interval:.2f}s, total batches: {total_status_batches}"
-            )
-            logger.info(
-                f"Estimated rate: {len(existing_locations) / interval_seconds:.2f} requests/second"
-            )
+                    success_count = await scrape_machine_status_batch(
+                        session, batch_dict, data_dir, logger
+                    )
 
-            # Process machine status in batches
-            location_items = list(existing_locations.items())
-            total_success = 0
+                    total_success += success_count
 
-            for i in range(0, len(location_items), status_batch_size):
-                batch_dict = dict(location_items[i : i + status_batch_size])
-                batch_start = asyncio.get_event_loop().time()
+                    # Wait for next batch timing (except for last batch)
+                    if batch_num < total_status_batches:
+                        elapsed = asyncio.get_event_loop().time() - batch_start
+                        sleep_time = max(0, status_batch_interval - elapsed)
+                        if sleep_time > 0:
+                            await asyncio.sleep(sleep_time)
 
-                batch_num = i // status_batch_size + 1
+                cycle_duration = asyncio.get_event_loop().time() - cycle_start_time
                 logger.info(
-                    f"Processing status batch {batch_num}/{total_status_batches} ({len(batch_dict)} locations)"
+                    f"Cycle {cycle_count} complete: {total_success} successful updates in {cycle_duration:.2f}s"
                 )
 
-                success_count = await scrape_machine_status_batch(
-                    session, batch_dict, data_dir, logger
-                )
+                # Wait for the remainder of the interval before starting next cycle
+                remaining_cycle_time = interval_seconds - cycle_duration
+                if remaining_cycle_time > 0:
+                    logger.info(
+                        f"Waiting {remaining_cycle_time:.2f}s before next cycle..."
+                    )
+                    await asyncio.sleep(remaining_cycle_time)
+                else:
+                    logger.warning(
+                        f"Cycle took {cycle_duration:.2f}s, longer than {interval_seconds}s interval!"
+                    )
 
-                total_success += success_count
-
-                # Wait for next batch timing (except for last batch)
-                if batch_num < total_status_batches:
-                    elapsed = asyncio.get_event_loop().time() - batch_start
-                    sleep_time = max(0, status_batch_interval - elapsed)
-                    if sleep_time > 0:
-                        logger.debug(
-                            f"Waiting {sleep_time:.2f}s before next status batch"
-                        )
-                        await asyncio.sleep(sleep_time)
-
-            logger.info(
-                f"Phase 2 complete: Successfully scraped status for {total_success} locations"
-            )
-
-        total_duration = asyncio.get_event_loop().time() - start_time
-        logger.info(f"Bulk scraper completed in {total_duration:.2f}s")
+        except KeyboardInterrupt:
+            logger.info(f"Stopping continuous scraping after {cycle_count} cycles")
+        except Exception as e:
+            logger.error(f"Error in continuous scraping: {e}")
+            raise
 
 
 def main():
@@ -506,8 +532,8 @@ def main():
         "--max-concurrent",
         "-c",
         type=int,
-        default=10,
-        help="Maximum concurrent requests per batch (default: 10)",
+        default=50,
+        help="Maximum concurrent requests per batch - used as upper bound (default: 50)",
     )
     parser.add_argument(
         "--data-dir", default="data", help="Directory to store data files"
