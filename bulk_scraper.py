@@ -2,13 +2,14 @@
 #
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["requests", "aiohttp", "asyncio"]
+# dependencies = ["requests", "aiohttp", "asyncio", "pandas"]
 # ///
 
 """
 Bulk API Scraper for Wash Mobile Pay
 Scrapes location data and machine status from API endpoints for a range of location codes.
 Distributes requests evenly across time intervals with parallel processing.
+Now includes integrated parsing to CSV and cleanup of JSON files.
 Usage: uv run bulk_scraper.py W000001 W010000 --interval 15
 """
 
@@ -22,8 +23,19 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
 import re
 import math
+import importlib.util
 
 import aiohttp
+import pandas as pd
+
+# Import parser module at global scope
+parser_path = Path(__file__).parent / "parser.py"
+if not parser_path.exists():
+    raise ImportError(f"parser.py not found at {parser_path}")
+
+spec = importlib.util.spec_from_file_location("parser", parser_path)
+parser = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(parser)
 
 
 def setup_logging(log_dir: Path) -> logging.Logger:
@@ -179,6 +191,59 @@ def load_json(filepath: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
+def parse_and_cleanup_location_data(
+    location_code: str, data_dir: Path, logger: logging.Logger
+) -> bool:
+    """Parse location data to CSV and cleanup JSON files."""
+    try:
+        # Parse the location data
+        records = parser.parse_location_code_data(location_code, data_dir, logger)
+
+        if not records:
+            logger.warning(f"No records found for {location_code}")
+            return False
+
+        # Create DataFrame and save to CSV
+        df = pd.DataFrame(records)
+        df = df.sort_values(["request_time", "room_id", "machine_number"])
+
+        # Save to CSV
+        output_dir = data_dir / location_code
+        output_file = output_dir / "parsed.csv"
+
+        # Append to existing CSV or create new one
+        df.to_csv(output_file, index=False, mode="a", header=not output_file.exists())
+        logger.info(f"Parsed and saved {len(df)} records to {output_file}")
+
+        # Cleanup: Remove JSON status files (keep location file)
+        location_dir = data_dir / location_code
+        uln_pattern = re.compile(
+            r"^[A-Z]{2}[A-Z0-9]+-\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{4}Z\.json$"
+        )
+
+        removed_count = 0
+        for json_file in location_dir.glob("*.json"):
+            # Only remove status files, keep location files
+            if uln_pattern.match(json_file.name):
+                try:
+                    json_file.unlink()
+                    removed_count += 1
+                    logger.debug(f"Removed JSON file: {json_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove {json_file}: {e}")
+
+        if removed_count > 0:
+            logger.info(
+                f"Cleaned up {removed_count} JSON status files for {location_code}"
+            )
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to parse and cleanup data for {location_code}: {e}")
+        return False
+
+
 async def scrape_location_batch(
     session: aiohttp.ClientSession,
     location_codes: List[str],
@@ -245,7 +310,7 @@ async def scrape_machine_status_batch(
     data_dir: Path,
     logger: logging.Logger,
 ) -> int:
-    """Scrape machine status for a batch of locations."""
+    """Scrape machine status for a batch of locations, parse to CSV, and cleanup."""
     if not location_to_uln:
         return 0
 
@@ -259,6 +324,7 @@ async def scrape_machine_status_batch(
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
     success_count = 0
+    codes_to_parse = []
 
     request_time = (
         datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-3] + "Z"
@@ -281,7 +347,12 @@ async def scrape_machine_status_batch(
         status_file = data_dir / code / f"{uln}-{request_time}.json"
         if save_json(data, status_file, logger):
             success_count += 1
+            codes_to_parse.append(code)
             logger.debug(f"Saved machine status for {code}")
+
+    # Parse and cleanup for all successfully scraped codes
+    for code in codes_to_parse:
+        parse_and_cleanup_location_data(code, data_dir, logger)
 
     return success_count
 
@@ -338,7 +409,7 @@ async def run_bulk_scraper(
     max_concurrent: int,  # Now used as absolute maximum only
     logger: logging.Logger,
 ):
-    """Run the bulk scraper with distributed timing."""
+    """Run the bulk scraper with distributed timing and integrated parsing."""
     failed_codes = load_failed_codes(data_dir)
     logger.info(f"Loaded {len(failed_codes)} previously failed codes")
 
@@ -422,7 +493,7 @@ async def run_bulk_scraper(
             # Update existing locations with new ones
             existing_locations.update(new_locations)
 
-        # Phase 2: Continuous machine status scraping
+        # Phase 2: Continuous machine status scraping with parsing
         if not existing_locations:
             logger.warning("No valid locations found for machine status scraping")
             return
@@ -470,7 +541,7 @@ async def run_bulk_scraper(
                     f"Starting cycle {cycle_count} - processing {len(existing_locations)} locations"
                 )
 
-                # Process machine status in batches
+                # Process machine status in batches with parsing
                 for i in range(0, len(location_items), status_batch_size):
                     batch_dict = dict(location_items[i : i + status_batch_size])
                     batch_start = asyncio.get_event_loop().time()
@@ -495,7 +566,7 @@ async def run_bulk_scraper(
 
                 cycle_duration = asyncio.get_event_loop().time() - cycle_start_time
                 logger.info(
-                    f"Cycle {cycle_count} complete: {total_success} successful updates in {cycle_duration:.2f}s"
+                    f"Cycle {cycle_count} complete: {total_success} successful updates and parses in {cycle_duration:.2f}s"
                 )
 
                 # Wait for the remainder of the interval before starting next cycle
@@ -518,7 +589,9 @@ async def run_bulk_scraper(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bulk scrape Wash Mobile Pay API")
+    parser = argparse.ArgumentParser(
+        description="Bulk scrape Wash Mobile Pay API with integrated parsing"
+    )
     parser.add_argument("start_code", help="Starting location code (e.g., W000001)")
     parser.add_argument("end_code", help="Ending location code (e.g., W010000)")
     parser.add_argument(
@@ -557,7 +630,7 @@ def main():
     logger = setup_logging(log_dir)
 
     logger.info(
-        f"Starting bulk scraper for {len(location_codes)} codes ({args.start_code} to {args.end_code})"
+        f"Starting bulk scraper with integrated parsing for {len(location_codes)} codes ({args.start_code} to {args.end_code})"
     )
     logger.info(
         f"Interval: {args.interval} minutes, Max concurrent: {args.max_concurrent}"
