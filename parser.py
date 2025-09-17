@@ -263,9 +263,12 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / "parsed.csv"
 
-    df.to_csv(output_file, index=False)
-    logger.info(f"CSV saved to: {output_file}")
-    logger.info(f"Total records: {len(df)}")
+    # If file exists, append without header, otherwise create new with header
+    df.to_csv(output_file, index=False, mode="a", header=not output_file.exists())
+    logger.info(
+        f"CSV {'appended to' if output_file.exists() else 'saved to'}: {output_file}"
+    )
+    logger.info(f"Total records added: {len(df)}")
 
     # Print summary statistics
     logger.info("\nSummary:")
