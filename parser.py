@@ -216,6 +216,7 @@ def parse_location_code_data(
                     "time_remaining": int(machine.get("time_remaining")),
                     "type": machine.get("type"),
                     "request_time": request_time,
+                    "status_raw": machine.get("status"),
                     # Calculated status
                     "status": calculate_status(machine, request_time),
                 }
