@@ -1,13 +1,15 @@
 #!/bin/bash
 # cleanup.sh - Deletes all files except those starting with W0 or parsed
 # in /root/Wash-Connect-Analysis/data and its subdirectories
+# Also truncates the log file to 10MB to avoid uncontrolled growth.
 
 set -euo pipefail
-# -e : exit on any command failure
-# -u : error on unset variables
-# -o pipefail : fail if any part of a pipeline fails
 
 TARGET_DIR="/root/Wash-Connect-Analysis/data"
+LOG_FILE="/root/Wash-Connect-Analysis/logs/bulk_scraper.log"
+
+# Truncate the log file to 10MB (keeps the oldest 10MB)
+truncate -s 10M "$LOG_FILE"
 
 # Safety: only proceed if directory exists
 if [ -d "$TARGET_DIR" ]; then
