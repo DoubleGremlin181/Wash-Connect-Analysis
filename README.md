@@ -1,11 +1,12 @@
 # Wash Connect Analysis
 
-This repository contains tools for scraping and analyzing data from the Wash Connect App. It provides two main approaches for data collection: single location monitoring and bulk continuous scraping.
+This repository contains tools for scraping and analyzing data from the Wash Connect App. It provides two main approaches for data collection: single location monitoring and bulk continuous scraping, plus location mapping capabilities.
 
 ## Features
 
 - **Single Location Scraping**: Monitor individual laundromat locations at fixed intervals
 - **Bulk Continuous Scraping**: Monitor multiple locations simultaneously with integrated parsing
+- **Location Mapping**: Convert partial addresses to full addresses with coordinates using Google Maps API
 - **Automatic Data Parsing**: Convert JSON data to CSV format for analysis
 - **Storage Optimization**: Automatic cleanup of temporary JSON files
 - **Failed Location Tracking**: Automatically skip locations that return 404 errors
@@ -24,7 +25,16 @@ cd Wash-Connect-Analysis/
 
 3. Make scripts executable:
 ```bash
-chmod +x setup.sh scraper.py bulk_scraper.py parser.py cleanup.sh
+chmod +x setup.sh scraper.py bulk_scraper.py parser.py cleanup.sh location_code_mapper.py
+```
+
+4. **For location mapping** (optional):
+```bash
+# Copy the environment template
+cp .env.example .env
+
+# Edit .env and add your Google Maps API key
+# GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
 ```
 
 ## Usage Options
@@ -99,6 +109,48 @@ screen -S wash-scraper-fast
 - Failed locations: `data/failed_codes.json`
 - Logs: `logs/bulk_scraper.log`
 
+### Option 3: Location Mapping (location_code_mapper.py)
+
+Convert partial location addresses to full addresses with coordinates using Google Maps API.
+
+**Setup:**
+1. Get a Google Maps API key from [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable the Geocoding API for your project
+3. Add your API key to `.env`:
+```bash
+cp .env.example .env
+# Edit .env and add: GOOGLE_MAPS_API_KEY=your_api_key_here
+```
+
+**Usage:**
+```bash
+# Process all locations that have been scraped
+./location_code_mapper.py
+
+# Process a single location
+./location_code_mapper.py W000001
+
+# Specify custom output file location
+./location_code_mapper.py --output-file custom_mapping.csv
+```
+
+**What it does:**
+- Reads location names and state codes from scraped data
+- Uses Google Geocoding API to get full addresses and coordinates  
+- Outputs a CSV file with mapping data
+- Handles rate limiting and API errors gracefully
+- Appends to existing CSV files (won't re-process existing locations)
+
+**Output CSV columns:**
+- `location_code`: Original location code (e.g., W000001)
+- `location_id`: Internal location ID
+- `original_name`: Original location name from API
+- `state_code`: State code extracted from ULN
+- `formatted_address`: Full address from Google Maps
+- `latitude` / `longitude`: Coordinates
+- `place_id`: Google Places ID for reference
+- `geocoding_success`: Boolean indicating if geocoding worked
+
 ## Data Structure
 
 The scraped data includes:
@@ -167,6 +219,12 @@ Run cleanup manually:
 ./cleanup.sh
 ```
 
+**Google Maps API issues:**
+- Ensure your API key is valid and has the Geocoding API enabled
+- Check your API quotas and billing in Google Cloud Console
+- The mapper includes rate limiting (0.1s delay between requests) to stay within limits
+- Failed geocoding attempts are logged but don't stop the process
+
 ## File Structure
 
 ```
@@ -175,15 +233,40 @@ Wash-Connect-Analysis/
 │   ├── W000001/
 │   │   ├── W000001.json          # Location data
 │   │   └── parsed.csv            # Parsed machine data
-│   └── failed_codes.json         # Failed location codes
+│   ├── failed_codes.json         # Failed location codes
+│   └── location_code_mapping.csv # Address/coordinate mapping
 ├── logs/
 │   └── bulk_scraper.log          # Scraping logs
+├── .env.example                  # Environment template
 ├── bulk_scraper.py               # Bulk continuous scraper
 ├── scraper.py                    # Single location scraper
 ├── parser.py                     # JSON to CSV parser
+├── location_code_mapper.py       # Google Maps geocoding
 ├── setup.sh                      # Single location setup
 └── cleanup.sh                    # Storage cleanup script
 ```
+
+## Workflow Recommendations
+
+1. **Discovery Phase**: Use bulk scraper to identify valid locations
+   ```bash
+   ./bulk_scraper.py W000001 W010000 --interval 15
+   ```
+
+2. **Location Mapping**: Get full addresses for valid locations
+   ```bash
+   ./location_code_mapper.py
+   ```
+
+3. **Continuous Monitoring**: Focus on specific regions or high-activity locations
+   ```bash
+   ./bulk_scraper.py W005000 W005100 --interval 10
+   ```
+
+4. **Data Analysis**: Use the parsed CSV files for analysis
+   - Machine utilization patterns
+   - Peak usage times by location
+   - Geographic analysis with mapped coordinates
 
 ## License
 
