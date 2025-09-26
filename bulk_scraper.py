@@ -7,10 +7,19 @@
 
 """
 Bulk API Scraper for Wash Mobile Pay
-Scrapes location data and machine status from API endpoints for a range of location codes.
+Scrapes location data and machine status from API endpoints for a list of location codes.
 Distributes requests evenly across time intervals with parallel processing.
 Now includes integrated parsing to CSV and cleanup of JSON files.
-Usage: uv run bulk_scraper.py W000001 W010000 --interval 15
+
+Usage:
+  # Using a range (original functionality)
+  uv run bulk_scraper.py --range W000001 W010000 --interval 15
+
+  # Using a file with location codes
+  uv run bulk_scraper.py --file location_codes.txt --interval 15
+
+  # Using specific codes directly
+  uv run bulk_scraper.py --codes W000001 W000002 W000003 --interval 15
 """
 
 import argparse
@@ -101,6 +110,52 @@ def generate_location_codes(start_code: str, end_code: str) -> List[str]:
         codes.append(code)
 
     return codes
+
+
+def load_location_codes_from_file(filepath: Path, logger: logging.Logger) -> List[str]:
+    """Load location codes from a text file (one per line)."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            codes = []
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+
+                # Skip empty lines and comments
+                if not line or line.startswith("#"):
+                    continue
+
+                # Validate location code format
+                try:
+                    parse_location_code(line)
+                    codes.append(line.upper())
+                except ValueError as e:
+                    logger.warning(
+                        f"Invalid location code on line {line_num}: '{line}' - {e}"
+                    )
+                    continue
+
+        logger.info(f"Loaded {len(codes)} valid location codes from {filepath}")
+        return codes
+
+    except FileNotFoundError:
+        logger.error(f"Location codes file not found: {filepath}")
+        raise
+    except Exception as e:
+        logger.error(f"Error reading location codes file {filepath}: {e}")
+        raise
+
+
+def validate_location_codes(codes: List[str], logger: logging.Logger) -> List[str]:
+    """Validate and clean up location codes."""
+    valid_codes = []
+    for code in codes:
+        try:
+            parse_location_code(code)
+            valid_codes.append(code.upper())
+        except ValueError as e:
+            logger.warning(f"Invalid location code '{code}': {e}")
+
+    return valid_codes
 
 
 def load_failed_codes(data_dir: Path) -> Set[str]:
@@ -588,12 +643,56 @@ async def run_bulk_scraper(
             raise
 
 
+def create_argument_groups(parser):
+    """Create mutually exclusive argument groups for different input methods."""
+    input_group = parser.add_mutually_exclusive_group(required=True)
+
+    input_group.add_argument(
+        "--range",
+        nargs=2,
+        metavar=("START", "END"),
+        help="Range of location codes (e.g., --range W000001 W010000)",
+    )
+
+    input_group.add_argument(
+        "--file",
+        type=Path,
+        help="Text file containing location codes (one per line, comments with #)",
+    )
+
+    input_group.add_argument(
+        "--codes",
+        nargs="+",
+        help="Specific location codes (e.g., --codes W000001 W000002 W000003)",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Bulk scrape Wash Mobile Pay API with integrated parsing"
+        description="Bulk scrape Wash Mobile Pay API with integrated parsing",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Using a range (original functionality)
+  ./bulk_scraper.py --range W000001 W010000 --interval 15
+  
+  # Using a file with location codes
+  ./bulk_scraper.py --file location_codes.txt --interval 15
+  
+  # Using specific codes directly
+  ./bulk_scraper.py --codes W000001 W000002 W000003 --interval 15
+
+Location codes file format:
+  W000001
+  W000050
+  W001234
+  # This is a comment
+  W005678
+        """,
     )
-    parser.add_argument("start_code", help="Starting location code (e.g., W000001)")
-    parser.add_argument("end_code", help="Ending location code (e.g., W010000)")
+
+    create_argument_groups(parser)
+
     parser.add_argument(
         "--interval",
         "-i",
@@ -617,20 +716,46 @@ def main():
 
     args = parser.parse_args()
 
-    try:
-        location_codes = generate_location_codes(args.start_code, args.end_code)
-    except ValueError as e:
-        print(f"Error: {e}")
-        sys.exit(1)
-
     data_dir = Path(args.data_dir)
     log_dir = Path(args.log_dir)
 
     # Setup logging
     logger = setup_logging(log_dir)
 
+    try:
+        # Determine location codes based on input method
+        if args.range:
+            start_code, end_code = args.range
+            location_codes = generate_location_codes(start_code, end_code)
+            logger.info(
+                f"Generated {len(location_codes)} codes from range {start_code} to {end_code}"
+            )
+
+        elif args.file:
+            location_codes = load_location_codes_from_file(args.file, logger)
+            logger.info(f"Loaded {len(location_codes)} codes from file {args.file}")
+
+        elif args.codes:
+            location_codes = validate_location_codes(args.codes, logger)
+            logger.info(f"Using {len(location_codes)} specified codes")
+
+        else:
+            logger.error("No input method specified")
+            sys.exit(1)
+
+        if not location_codes:
+            logger.error("No valid location codes found")
+            sys.exit(1)
+
+    except ValueError as e:
+        logger.error(f"Error processing location codes: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Error loading location codes: {e}")
+        sys.exit(1)
+
     logger.info(
-        f"Starting bulk scraper with integrated parsing for {len(location_codes)} codes ({args.start_code} to {args.end_code})"
+        f"Starting bulk scraper with integrated parsing for {len(location_codes)} codes"
     )
     logger.info(
         f"Interval: {args.interval} minutes, Max concurrent: {args.max_concurrent}"
