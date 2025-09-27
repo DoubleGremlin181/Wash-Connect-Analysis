@@ -25,7 +25,7 @@ cd Wash-Connect-Analysis/
 
 3. Make scripts executable:
 ```bash
-chmod +x setup.sh scraper.py bulk_scraper.py parser.py cleanup.sh location_code_mapper.py
+chmod +x setup.sh scraper.py bulk_scraper.py parser.py location_code_mapper.py
 ```
 
 4. **For location mapping** (optional):
@@ -95,12 +95,6 @@ screen -S wash-scraper-small
 # Higher concurrency for faster processing
 screen -S wash-scraper-fast
 ./bulk_scraper.py W000001 W001000 --interval 15 --max-concurrent 100
-```
-
-2. **Set up automatic cleanup** (recommended):
-```bash
-# Add cleanup to crontab (runs every hour)
-(crontab -l; echo "0 * * * * /root/Wash-Connect-Analysis/cleanup.sh >> /root/cleanup.log 2>&1") | crontab -
 ```
 
 **Files created:**
@@ -178,18 +172,40 @@ crontab -l
 
 # Monitor data directory size
 du -sh data/
-
-# Check cleanup logs
-tail -f /root/cleanup.log
 ```
 
-### Storage management:
-The `cleanup.sh` script automatically:
-- Removes temporary JSON files (keeps parsed CSV and location data)
-- Truncates log files to 10MB
-- Preserves essential data for analysis
+### Log Rotation
 
-### Stop continuous scraping:
+Set up automatic log rotation to manage log file sizes:
+
+```bash
+sudo tee /etc/logrotate.d/wash-scraper << 'EOF'
+/root/Wash-Connect-Analysis/logs/*.log {
+    daily
+    rotate 7
+    notifempty
+    missingok
+    compress
+    delaycompress
+    copytruncate
+    create 644 root root
+    dateext
+    dateformat -%Y-%m-%d
+}
+EOF
+```
+
+This configuration:
+
+- Rotates logs daily
+- Keeps 7 days of logs
+- Compresses old logs
+- Names files with date suffix
+- Skips empty log files
+- Creates new files with 644 permissions
+
+### Stop continuous scraping
+
 In the screen session, press `Ctrl+C`, or detach and kill:
 ```bash
 # Detach from screen: Ctrl+A, then D
@@ -213,12 +229,6 @@ The scripts use `uv` with inline dependencies - no manual installation needed.
 **404 errors for locations:**
 Failed locations are automatically tracked in `data/failed_codes.json` and skipped in future runs.
 
-**Disk space issues:**
-Run cleanup manually:
-```bash
-./cleanup.sh
-```
-
 **Google Maps API issues:**
 - Ensure your API key is valid and has the Geocoding API enabled
 - Check your API quotas and billing in Google Cloud Console
@@ -227,6 +237,7 @@ Run cleanup manually:
 
 ## File Structure
 
+```
 ```
 Wash-Connect-Analysis/
 ├── data/
@@ -243,7 +254,7 @@ Wash-Connect-Analysis/
 ├── parser.py                     # JSON to CSV parser
 ├── location_code_mapper.py       # Google Maps geocoding
 ├── setup.sh                      # Single location setup
-└── cleanup.sh                    # Storage cleanup script
+└── README.md                     # This documentation
 ```
 
 ## Workflow Recommendations
