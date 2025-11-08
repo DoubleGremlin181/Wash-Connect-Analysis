@@ -2,4 +2,5 @@ logs/*
 data/*
 run_scraper.sh
 .env
+*.venv/
 .ipynb_checkpoints/
