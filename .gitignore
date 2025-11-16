@@ -4,3 +4,4 @@ run_scraper.sh
 .env
 *.venv/
 .ipynb_checkpoints/
+*.ipynb
